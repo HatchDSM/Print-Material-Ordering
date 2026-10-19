@@ -153,6 +153,9 @@
       grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
       align-items: start;
     }
+    .pmo-row.has-option .pmo-fields {
+      grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1fr);
+    }
     .pmo-field-details { grid-column: 1 / -1; }
     .pmo-btn-add { width: auto; }
   }
@@ -177,14 +180,57 @@
   "use strict";
 
   /* =====================================================================
-     CONFIG: edit this object to add, remove, or change items.
-     Key = item name shown in the dropdown; value = allowed quantities.
+     CONFIG: edit these objects to add, remove, or change items.
      ===================================================================== */
+
+  // Quantities shared by most items.
+  const STANDARD_QTY = [100, 250, 500, 1000];
+
+  // Key = item name shown in the dropdown; value = allowed quantities.
+  // Items appear in the dropdown in this order.
   const ITEMS = {
     "Envelopes #10 Size": [500, 1000, 2500, 5000],
     "Business Cards": [250, 500, 1000],
     "Inserts": [100, 200, 500, 1000],
-    "Rack Cards": [500, 1000, 2000, 2500, 5000, 7500, 10000]
+    "Rack Cards": [500, 1000, 2000, 2500, 5000, 7500, 10000],
+    "Ordering Cheat Sheets": STANDARD_QTY,
+    "One Pagers": STANDARD_QTY,
+    "Appointment Cards": STANDARD_QTY,
+    "Interventional Radiologist Cards": STANDARD_QTY,
+    "Billing Office Cards": STANDARD_QTY,
+    "Image Order Form": STANDARD_QTY,
+    "Consent/Medical Release Form": STANDARD_QTY,
+    "Minor Authorization Form": STANDARD_QTY,
+    "Letterhead": STANDARD_QTY,
+    "Direct Mailer (Breast MRI)": STANDARD_QTY,
+    "Recruitment Flyer": STANDARD_QTY
+  };
+
+  // Items that need an extra required dropdown. The key must match an ITEMS name
+  // exactly. "label" is the dropdown's label (also used in the email);
+  // "choices" are its options.
+  const ITEM_OPTIONS = {
+    "Rack Cards": {
+      label: "Procedure",
+      choices: [
+        "Body composition",
+        "Breast biopsy",
+        "CT cardiac calcium scoring",
+        "CT scan",
+        "DEXA scan",
+        "Hysterosalpingogram",
+        "Prostate artery embolization",
+        "Virtual colonoscopy"
+      ]
+    },
+    "Ordering Cheat Sheets": {
+      label: "Modality",
+      choices: ["Mammo", "MRI", "CT"]
+    },
+    "One Pagers": {
+      label: "Topic",
+      choices: ["Heartflow", "Abbadox Referring Provider Portal"]
+    }
   };
 
   const MAX_ROWS = 50;
@@ -247,6 +293,11 @@
           '<select id="pmo-item-' + id + '" data-role="item" aria-required="true" aria-describedby="pmo-item-' + id + '-err"></select>' +
           '<p class="pmo-error" id="pmo-item-' + id + '-err" hidden></p>' +
         '</div>' +
+        '<div class="pmo-field" data-field="option" hidden>' +
+          '<label for="pmo-option-' + id + '"><span data-role="option-label">Option</span><span class="pmo-req" aria-hidden="true">*</span></label>' +
+          '<select id="pmo-option-' + id + '" data-role="option" aria-required="true" aria-describedby="pmo-option-' + id + '-err"></select>' +
+          '<p class="pmo-error" id="pmo-option-' + id + '-err" hidden></p>' +
+        '</div>' +
         '<div class="pmo-field">' +
           '<label for="pmo-qty-' + id + '">Quantity<span class="pmo-req" aria-hidden="true">*</span></label>' +
           '<select id="pmo-qty-' + id + '" data-role="qty" aria-required="true" aria-describedby="pmo-qty-' + id + '-err"></select>' +
@@ -265,9 +316,27 @@
 
     const item = data.item && Object.prototype.hasOwnProperty.call(ITEMS, data.item) ? data.item : "";
     itemSel.value = item;
+    populateOption(row, item, data.option);
     populateQty(row.querySelector('[data-role="qty"]'), item, data.qty);
     row.querySelector('[data-role="details"]').value = data.details ? String(data.details) : "";
     return row;
+  }
+
+  const optionFor = (item) => (item && ITEM_OPTIONS[item]) || null;
+
+  // Shows the follow-up dropdown only for items listed in ITEM_OPTIONS.
+  function populateOption(row, item, selected) {
+    const cfg = optionFor(item);
+    const wrap = row.querySelector('[data-field="option"]');
+    const sel = row.querySelector('[data-role="option"]');
+    sel.innerHTML = "";
+    wrap.hidden = !cfg;
+    row.classList.toggle("has-option", !!cfg);
+    if (!cfg) return;
+    row.querySelector('[data-role="option-label"]').textContent = cfg.label;
+    sel.add(new Option("Select " + cfg.label.toLowerCase(), ""));
+    cfg.choices.forEach((c) => sel.add(new Option(c, c)));
+    sel.value = selected && cfg.choices.indexOf(selected) !== -1 ? selected : "";
   }
 
   function populateQty(qtySel, item, selected) {
@@ -286,6 +355,7 @@
   function readRow(row) {
     return {
       item: field(row, "item").value,
+      option: optionFor(field(row, "item").value) ? field(row, "option").value : "",
       qty: field(row, "qty").value,
       details: field(row, "details").value.trim()
     };
@@ -383,6 +453,7 @@
 
   function clearRowErrors(row) {
     setFieldError(field(row, "item"), "");
+    setFieldError(field(row, "option"), "");
     setFieldError(field(row, "qty"), "");
   }
 
@@ -402,14 +473,17 @@
     rows.forEach((row, i) => {
       const r = data[i];
       let bad = false;
+      const flag = (role, msg) => {
+        setFieldError(field(row, role), msg);
+        firstInvalid = firstInvalid || field(row, role);
+        bad = true;
+      };
       if (!r.item) {
-        setFieldError(field(row, "item"), "Please choose an item.");
-        firstInvalid = firstInvalid || field(row, "item");
-        bad = true;
-      } else if (!r.qty) {
-        setFieldError(field(row, "qty"), "Please choose a quantity.");
-        firstInvalid = firstInvalid || field(row, "qty");
-        bad = true;
+        flag("item", "Please choose an item.");
+      } else {
+        const cfg = optionFor(r.item);
+        if (cfg && !r.option) flag("option", "Please choose a " + cfg.label.toLowerCase() + ".");
+        if (!r.qty) flag("qty", "Please choose a quantity.");
       }
       if (bad) badRows++;
     });
@@ -417,7 +491,7 @@
     if (firstInvalid) {
       setStatus(
         badRows === 1
-          ? "Please complete the highlighted field."
+          ? "Please complete the highlighted fields."
           : "Please complete the highlighted fields in " + badRows + " items.",
         true
       );
@@ -447,11 +521,13 @@
   function buildList(rows) {
     return rows.map((r, i) => {
       const details = detailLines(r.details);
+      const cfg = optionFor(r.item);
       return [
         "Item " + (i + 1) + ": " + (r.item || NONE),
+        cfg ? cfg.label + ": " + (r.option || NONE) : null,
         "Quantity: " + (r.qty ? fmtQty(r.qty) : NONE),
         "Details: " + (details.length ? details.join("\n") : NONE)
-      ].join("\n");
+      ].filter((l) => l !== null).join("\n");
     }).join("\n\n");
   }
 
@@ -459,6 +535,7 @@
   function buildLines(rows) {
     return rows.map((r, i) =>
       "Item " + (i + 1) + ": " + (r.item || NONE) +
+      (optionFor(r.item) ? " | " + optionFor(r.item).label + ": " + (r.option || NONE) : "") +
       " | Qty: " + (r.qty ? fmtQty(r.qty) : NONE) +
       " | Details: " + (oneLine(r.details) || NONE)
     ).join("\n");
@@ -468,7 +545,7 @@
     if (!rows.length) return "";
     const text = state.format === "text" ? buildLines(rows) : buildList(rows);
     if (!state.embedData) return text;
-    const json = JSON.stringify({ v: 1, rows: rows.map((r) => ({ item: r.item, qty: r.qty, details: r.details })) });
+    const json = JSON.stringify({ v: 1, rows: rows.map((r) => ({ item: r.item, option: r.option, qty: r.qty, details: r.details })) });
     return text + DATA_DELIMITER + json;
   }
 
@@ -479,6 +556,7 @@
       .slice(0, MAX_ROWS)
       .map((r) => ({
         item: r.item ? String(r.item) : "",
+        option: r.option ? String(r.option) : "",
         qty: r.qty != null ? String(r.qty).replace(/,/g, "") : "",
         details: r.details ? String(r.details) : ""
       }));
@@ -515,7 +593,8 @@
 
   function parseText(s) {
     const clean = (v) => { v = String(v || "").trim(); return v === NONE ? "" : v; };
-    const oneLineRe = /^\s*Item\s+\d+:\s*(.*?)\s*\|\s*Qty:\s*(.*?)\s*\|\s*Details:\s*(.*)$/i;
+    const oneLineRe = /^\s*Item\s+\d+:\s*(.*?)\s*\|\s*(?:[^|:]+:\s*(.*?)\s*\|\s*)?Qty:\s*(.*?)\s*\|\s*Details:\s*(.*)$/i;
+    const optionRe = /^\s*[^:]+:\s*(.*)$/;
     const headRe = /^\s*Item\s+\d+:\s*(.*)$/i;
     const qtyRe = /^\s*Quantity:\s*(.*)$/i;
     const detRe = /^\s*Details:\s*(.*)$/i;
@@ -527,10 +606,10 @@
     s.split(/\r?\n/).forEach((line) => {
       let m;
       if ((m = line.match(oneLineRe))) {
-        rows.push({ item: clean(m[1]), qty: clean(m[2]).replace(/,/g, ""), details: clean(m[3]) });
+        rows.push({ item: clean(m[1]), option: clean(m[2]), qty: clean(m[3]).replace(/,/g, ""), details: clean(m[4]) });
         cur = null; inDetails = false;
       } else if ((m = line.match(headRe))) {
-        cur = { item: clean(m[1]), qty: "", details: "" };
+        cur = { item: clean(m[1]), option: "", qty: "", details: "" };
         rows.push(cur); inDetails = false;
       } else if (!cur || !line.trim()) {
         cur = line.trim() ? cur : null; inDetails = false;
@@ -538,6 +617,8 @@
         cur.qty = clean(m[1]).replace(/,/g, "");
       } else if (!inDetails && (m = line.match(detRe))) {
         cur.details = clean(m[1]); inDetails = true;
+      } else if (!inDetails && !cur.qty && optionFor(cur.item) && (m = line.match(optionRe))) {
+        cur.option = clean(m[1]);
       } else if (inDetails) {
         cur.details += (cur.details ? "\n" : "") + line.trim();
       }
@@ -552,10 +633,10 @@
     if (!row) return;
     if (e.target.dataset.role === "item") {
       const qtySel = field(row, "qty");
+      populateOption(row, e.target.value, field(row, "option").value);
       populateQty(qtySel, e.target.value, qtySel.value); // keep qty if still allowed
-      setFieldError(e.target, "");
-      setFieldError(qtySel, "");
-    } else if (e.target.dataset.role === "qty") {
+      clearRowErrors(row);
+    } else if (e.target.dataset.role === "qty" || e.target.dataset.role === "option") {
       setFieldError(e.target, "");
     }
     if (statusEl.classList.contains("is-error") && !rowsEl.querySelector(".is-invalid")) setStatus("");
