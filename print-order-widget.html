@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Print Material Order</title>
+
+<!-- Jotform Custom Widget API (defines window.JFCustomWidget) -->
+<script src="https://js.jotform.com/JotFormCustomWidget.min.js"></script>
+
+<style>
+  :root {
+    --pmo-text: #1f2328;
+    --pmo-muted: #5b616e;
+    --pmo-border: #cfd4dc;
+    --pmo-border-strong: #9aa1ad;
+    --pmo-field-bg: #ffffff;
+    --pmo-row-bg: #f8f9fb;
+    --pmo-hover: #eef0f3;
+    --pmo-disabled: #f0f1f3;
+    --pmo-focus: #2563eb;
+    --pmo-error: #b42318;
+    --pmo-error-bg: #fef3f2;
+    --pmo-radius: 6px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  /* An iframe cannot inherit the parent form's font, so <html> carries a neutral
+     fallback (overridable via the "fontFamily" widget setting) and everything
+     below inherits from it. */
+  html {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 16px;
+    color: var(--pmo-text);
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    margin: 0;
+    padding: 3px; /* room for focus rings so they aren't clipped by the iframe */
+    background: transparent;
+    font-family: inherit;
+  }
+  .pmo, .pmo * { font-family: inherit; }
+  button, select, textarea { font: inherit; color: inherit; }
+  [hidden] { display: none !important; }
+
+  .pmo-rows { display: flex; flex-direction: column; gap: 12px; }
+
+  .pmo-row {
+    border: 1px solid var(--pmo-border);
+    border-radius: var(--pmo-radius);
+    background: var(--pmo-row-bg);
+    padding: 12px;
+  }
+  .pmo-row-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .pmo-row-title { margin: 0; font-size: 0.95rem; font-weight: 600; }
+  .pmo-row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  .pmo-fields { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .pmo-field { min-width: 0; }
+  .pmo-field label {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+  .pmo-req { color: var(--pmo-error); margin-left: 2px; }
+
+  .pmo select,
+  .pmo textarea {
+    display: block;
+    width: 100%;
+    min-height: 42px;
+    padding: 8px 10px;
+    border: 1px solid var(--pmo-border);
+    border-radius: var(--pmo-radius);
+    background-color: var(--pmo-field-bg);
+    font-size: 1rem; /* 16px prevents iOS zoom-on-focus */
+    line-height: 1.4;
+  }
+  .pmo select:hover:not(:disabled),
+  .pmo textarea:hover { border-color: var(--pmo-border-strong); }
+  .pmo textarea { resize: vertical; }
+  .pmo select:disabled {
+    background-color: var(--pmo-disabled);
+    color: var(--pmo-muted);
+    cursor: not-allowed;
+  }
+
+  .pmo :focus-visible {
+    outline: 2px solid var(--pmo-focus);
+    outline-offset: 2px;
+  }
+  .pmo select:focus,
+  .pmo textarea:focus { border-color: var(--pmo-focus); }
+
+  .pmo .is-invalid {
+    border-color: var(--pmo-error);
+    background-color: var(--pmo-error-bg);
+  }
+  .pmo-error {
+    margin: 4px 0 0;
+    font-size: 0.8125rem;
+    color: var(--pmo-error);
+  }
+
+  .pmo-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-height: 36px;
+    padding: 6px 12px;
+    border: 1px solid var(--pmo-border);
+    border-radius: var(--pmo-radius);
+    background: var(--pmo-field-bg);
+    font-size: 0.875rem;
+    line-height: 1.2;
+    cursor: pointer;
+  }
+  .pmo-btn:hover:not(:disabled) { background: var(--pmo-hover); border-color: var(--pmo-border-strong); }
+  .pmo-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+  .pmo-btn-remove { color: var(--pmo-error); }
+
+  .pmo-btn-add {
+    width: 100%;
+    min-height: 44px;
+    margin-top: 12px;
+    border-style: dashed;
+    font-size: 0.9375rem;
+    font-weight: 500;
+  }
+
+  .pmo-status {
+    margin: 10px 0 0;
+    font-size: 0.875rem;
+    color: var(--pmo-muted);
+  }
+  .pmo-status.is-error { color: var(--pmo-error); }
+  .pmo-status:empty { display: none; }
+
+  /* Wide screens: fields side by side */
+  @media (min-width: 600px) {
+    .pmo-fields {
+      grid-template-columns: minmax(0, 2fr) minmax(0, 1.3fr) minmax(0, 3fr);
+      align-items: start;
+    }
+    .pmo-btn-add { width: auto; }
+  }
+
+  /* Very narrow screens */
+  @media (max-width: 360px) {
+    .pmo-row { padding: 10px; }
+    .pmo-row-actions { width: 100%; }
+    .pmo-row-actions .pmo-btn { flex: 1 1 0; }
+  }
+</style>
+</head>
+<body>
+  <div class="pmo" id="pmo">
+    <div class="pmo-rows" id="pmo-rows"></div>
+    <button type="button" class="pmo-btn pmo-btn-add" id="pmo-add">+ Add another item</button>
+    <p class="pmo-status" id="pmo-status" role="status" aria-live="polite"></p>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* =====================================================================
+     CONFIG: edit this object to add, remove, or change items.
+     Key = item name shown in the dropdown; value = allowed quantities.
+     ===================================================================== */
+  const ITEMS = {
+    "Business Cards": [100, 250, 500],
+    "Flyers": [250, 500, 1000],
+    "Brochures": [250, 500, 1000, 2500]
+  };
+
+  const MAX_ROWS = 50;
+  const DATA_MARKER = "---DATA---";
+  const DATA_DELIMITER = "\n" + DATA_MARKER + "\n";
+
+  /* ===================================================================== */
+
+  const rowsEl = document.getElementById("pmo-rows");
+  const addBtn = document.getElementById("pmo-add");
+  const statusEl = document.getElementById("pmo-status");
+
+  const state = {
+    initialized: false,
+    required: false,
+    embedData: true,
+    lastHeight: 0
+  };
+  let uid = 0;
+
+  const hasApi = () => typeof window.JFCustomWidget !== "undefined";
+  const inIframe = (() => { try { return window.self !== window.top; } catch (e) { return true; } })();
+
+  function getSetting(name) {
+    if (!hasApi() || typeof JFCustomWidget.getWidgetSetting !== "function") return "";
+    try {
+      const v = JFCustomWidget.getWidgetSetting(name);
+      return v == null ? "" : String(v).trim();
+    } catch (e) {
+      return "";
+    }
+  }
+
+  const isTruthy = (v) => /^(yes|true|1|on)$/i.test(String(v || "").trim());
+  const isFalsy = (v) => /^(no|false|0|off)$/i.test(String(v || "").trim());
+  const fmtQty = (q) => Number(q).toLocaleString("en-US");
+
+  /* ---------- Row construction ---------- */
+
+  function buildRow(data) {
+    data = data || {};
+    const id = ++uid;
+    const row = document.createElement("div");
+    row.className = "pmo-row";
+    row.setAttribute("role", "group");
+    row.setAttribute("aria-labelledby", "pmo-title-" + id);
+    row.dataset.uid = String(id);
+
+    row.innerHTML =
+      '<div class="pmo-row-head">' +
+        '<p class="pmo-row-title" id="pmo-title-' + id + '"></p>' +
+        '<div class="pmo-row-actions">' +
+          '<button type="button" class="pmo-btn" data-action="duplicate">Duplicate</button>' +
+          '<button type="button" class="pmo-btn pmo-btn-remove" data-action="remove">Remove</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="pmo-fields">' +
+        '<div class="pmo-field">' +
+          '<label for="pmo-item-' + id + '">Item<span class="pmo-req" aria-hidden="true">*</span></label>' +
+          '<select id="pmo-item-' + id + '" data-role="item" aria-required="true" aria-describedby="pmo-item-' + id + '-err"></select>' +
+          '<p class="pmo-error" id="pmo-item-' + id + '-err" hidden></p>' +
+        '</div>' +
+        '<div class="pmo-field">' +
+          '<label for="pmo-qty-' + id + '">Quantity<span class="pmo-req" aria-hidden="true">*</span></label>' +
+          '<select id="pmo-qty-' + id + '" data-role="qty" aria-required="true" aria-describedby="pmo-qty-' + id + '-err"></select>' +
+          '<p class="pmo-error" id="pmo-qty-' + id + '-err" hidden></p>' +
+        '</div>' +
+        '<div class="pmo-field">' +
+          '<label for="pmo-details-' + id + '">Details</label>' +
+          '<textarea id="pmo-details-' + id + '" data-role="details" rows="2" ' +
+            'placeholder="Name, email, phone, notes"></textarea>' +
+        '</div>' +
+      '</div>';
+
+    const itemSel = row.querySelector('[data-role="item"]');
+    itemSel.add(new Option("Select an item", ""));
+    Object.keys(ITEMS).forEach((name) => itemSel.add(new Option(name, name)));
+
+    const item = data.item && Object.prototype.hasOwnProperty.call(ITEMS, data.item) ? data.item : "";
+    itemSel.value = item;
+    populateQty(row.querySelector('[data-role="qty"]'), item, data.qty);
+    row.querySelector('[data-role="details"]').value = data.details ? String(data.details) : "";
+    return row;
+  }
+
+  function populateQty(qtySel, item, selected) {
+    const list = item && ITEMS[item] ? ITEMS[item] : [];
+    qtySel.innerHTML = "";
+    qtySel.add(new Option(item ? "Select quantity" : "Select item first", ""));
+    list.forEach((q) => qtySel.add(new Option(fmtQty(q), String(q))));
+    qtySel.disabled = !item;
+    const sel = selected == null ? "" : String(selected).replace(/,/g, "");
+    qtySel.value = list.map(String).indexOf(sel) !== -1 ? sel : "";
+  }
+
+  const rowEls = () => Array.prototype.slice.call(rowsEl.querySelectorAll(".pmo-row"));
+  const field = (row, role) => row.querySelector('[data-role="' + role + '"]');
+
+  function readRow(row) {
+    return {
+      item: field(row, "item").value,
+      qty: field(row, "qty").value,
+      details: field(row, "details").value.trim()
+    };
+  }
+  const readRows = () => rowEls().map(readRow);
+  const isBlank = (r) => !r.item && !r.qty && !r.details;
+
+  /* ---------- Layout bookkeeping ---------- */
+
+  function renumber() {
+    const rows = rowEls();
+    const atMax = rows.length >= MAX_ROWS;
+    rows.forEach((row, i) => {
+      const n = i + 1;
+      row.querySelector(".pmo-row-title").textContent = "Item " + n;
+      const dup = row.querySelector('[data-action="duplicate"]');
+      const rem = row.querySelector('[data-action="remove"]');
+      dup.setAttribute("aria-label", "Duplicate item " + n);
+      rem.setAttribute("aria-label", "Remove item " + n);
+      dup.disabled = atMax;
+      rem.hidden = rows.length === 1;
+    });
+    addBtn.disabled = atMax;
+    if (atMax) setStatus("Maximum of " + MAX_ROWS + " items reached.");
+    else if (statusEl.textContent.indexOf("Maximum") === 0) setStatus("");
+  }
+
+  function resize() {
+    if (!hasApi() || !inIframe || typeof JFCustomWidget.requestFrameResize !== "function") return;
+    window.requestAnimationFrame(() => {
+      const h = Math.ceil(Math.max(document.body.scrollHeight, document.documentElement.scrollHeight));
+      if (h === state.lastHeight) return;
+      state.lastHeight = h;
+      JFCustomWidget.requestFrameResize({ height: h });
+    });
+  }
+
+  function setStatus(msg, isError) {
+    statusEl.textContent = msg || "";
+    statusEl.classList.toggle("is-error", !!isError);
+  }
+
+  // Push the live value to Jotform (keeps Save & Continue Later / conditions in sync).
+  function pushData() {
+    if (!hasApi() || typeof JFCustomWidget.sendData !== "function") return;
+    try { JFCustomWidget.sendData({ value: buildValue(readRows().filter((r) => !isBlank(r))) }); } catch (e) {}
+  }
+
+  function afterChange() {
+    renumber();
+    resize();
+    pushData();
+  }
+
+  /* ---------- Row actions ---------- */
+
+  function addRow(data, afterRow) {
+    if (rowEls().length >= MAX_ROWS) return null;
+    const row = buildRow(data);
+    if (afterRow && afterRow.nextSibling) rowsEl.insertBefore(row, afterRow.nextSibling);
+    else rowsEl.appendChild(row);
+    afterChange();
+    return row;
+  }
+
+  function removeRow(row) {
+    const rows = rowEls();
+    if (rows.length <= 1) return;
+    const idx = rows.indexOf(row);
+    row.remove();
+    afterChange();
+    const remaining = rowEls();
+    const target = remaining[Math.min(idx, remaining.length - 1)];
+    (target ? field(target, "item") : addBtn).focus();
+    setStatus("Item " + (idx + 1) + " removed.");
+  }
+
+  function duplicateRow(row) {
+    const copy = addRow(readRow(row), row);
+    if (copy) {
+      field(copy, "item").focus();
+      setStatus("Item duplicated.");
+    }
+  }
+
+  /* ---------- Validation ---------- */
+
+  function setFieldError(el, msg) {
+    const err = document.getElementById(el.id + "-err");
+    el.classList.toggle("is-invalid", !!msg);
+    if (msg) el.setAttribute("aria-invalid", "true");
+    else el.removeAttribute("aria-invalid");
+    if (err) { err.textContent = msg || ""; err.hidden = !msg; }
+  }
+
+  function clearRowErrors(row) {
+    setFieldError(field(row, "item"), "");
+    setFieldError(field(row, "qty"), "");
+  }
+
+  function validate() {
+    const rows = rowEls();
+    const data = rows.map(readRow);
+    rows.forEach(clearRowErrors);
+
+    // Optional widget left completely empty: valid, empty value.
+    if (!state.required && data.every(isBlank)) {
+      setStatus("");
+      return { valid: true, value: "" };
+    }
+
+    let firstInvalid = null;
+    let badRows = 0;
+    rows.forEach((row, i) => {
+      const r = data[i];
+      let bad = false;
+      if (!r.item) {
+        setFieldError(field(row, "item"), "Please choose an item.");
+        firstInvalid = firstInvalid || field(row, "item");
+        bad = true;
+      } else if (!r.qty) {
+        setFieldError(field(row, "qty"), "Please choose a quantity.");
+        firstInvalid = firstInvalid || field(row, "qty");
+        bad = true;
+      }
+      if (bad) badRows++;
+    });
+
+    if (firstInvalid) {
+      setStatus(
+        badRows === 1
+          ? "Please complete the highlighted field."
+          : "Please complete the highlighted fields in " + badRows + " items.",
+        true
+      );
+      try { firstInvalid.focus(); } catch (e) {}
+      return { valid: false, value: buildValue(data.filter((r) => !isBlank(r))) };
+    }
+
+    setStatus("");
+    return { valid: true, value: buildValue(data) };
+  }
+
+  /* ---------- Serialization ---------- */
+
+  // Collapse multi-line details onto one line so each item stays on one line.
+  const oneLine = (s) => String(s || "").replace(/\s*[\r\n]+\s*/g, ", ").replace(/\s*\|\s*/g, " / ").trim();
+
+  function buildValue(rows) {
+    if (!rows.length) return "";
+    const text = rows
+      .map((r, i) =>
+        "Item " + (i + 1) + ": " + (r.item || "(none)") +
+        " | Qty: " + (r.qty ? fmtQty(r.qty) : "(none)") +
+        " | Details: " + (oneLine(r.details) || "(none)")
+      )
+      .join("\n");
+    if (!state.embedData) return text;
+    const json = JSON.stringify({ v: 1, rows: rows.map((r) => ({ item: r.item, qty: r.qty, details: r.details })) });
+    return text + DATA_DELIMITER + json;
+  }
+
+  function normalizeRows(arr) {
+    if (!Array.isArray(arr)) return null;
+    return arr
+      .filter((r) => r && typeof r === "object")
+      .slice(0, MAX_ROWS)
+      .map((r) => ({
+        item: r.item ? String(r.item) : "",
+        qty: r.qty != null ? String(r.qty).replace(/,/g, "") : "",
+        details: r.details ? String(r.details) : ""
+      }));
+  }
+
+  function parseJsonRows(s) {
+    try {
+      const obj = JSON.parse(s);
+      return normalizeRows(Array.isArray(obj) ? obj : obj && obj.rows);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Restores rows from: (1) the embedded JSON block, (2) raw JSON,
+  // or (3) the human-readable lines as a last resort.
+  function parseValue(raw) {
+    if (raw == null || raw === "") return null;
+    if (typeof raw === "object") return normalizeRows(Array.isArray(raw) ? raw : raw.rows);
+
+    let s = String(raw);
+    const idx = s.indexOf(DATA_MARKER);
+    if (idx !== -1) {
+      const rows = parseJsonRows(s.slice(idx + DATA_MARKER.length).trim());
+      if (rows && rows.length) return rows;
+      s = s.slice(0, idx);
+    }
+
+    const direct = parseJsonRows(s.trim());
+    if (direct && direct.length) return direct;
+
+    const re = /^\s*Item\s+\d+:\s*(.*?)\s*\|\s*Qty:\s*([\d,]+|\(none\))\s*\|\s*Details:\s*(.*)$/i;
+    const rows = s.split(/\r?\n/).map((line) => {
+      const m = line.match(re);
+      if (!m) return null;
+      return {
+        item: m[1] === "(none)" ? "" : m[1],
+        qty: m[2] === "(none)" ? "" : m[2].replace(/,/g, ""),
+        details: m[3] === "(none)" ? "" : m[3]
+      };
+    }).filter(Boolean);
+    return rows.length ? rows.slice(0, MAX_ROWS) : null;
+  }
+
+  /* ---------- Events ---------- */
+
+  rowsEl.addEventListener("change", (e) => {
+    const row = e.target.closest(".pmo-row");
+    if (!row) return;
+    if (e.target.dataset.role === "item") {
+      const qtySel = field(row, "qty");
+      populateQty(qtySel, e.target.value, qtySel.value); // keep qty if still allowed
+      setFieldError(e.target, "");
+      setFieldError(qtySel, "");
+    } else if (e.target.dataset.role === "qty") {
+      setFieldError(e.target, "");
+    }
+    if (statusEl.classList.contains("is-error") && !rowsEl.querySelector(".is-invalid")) setStatus("");
+    afterChange();
+  });
+
+  let inputTimer = null;
+  rowsEl.addEventListener("input", (e) => {
+    if (e.target.dataset.role !== "details") return;
+    resize();
+    clearTimeout(inputTimer);
+    inputTimer = setTimeout(pushData, 400);
+  });
+
+  rowsEl.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-action]");
+    if (!btn) return;
+    const row = btn.closest(".pmo-row");
+    if (btn.dataset.action === "remove") removeRow(row);
+    else if (btn.dataset.action === "duplicate") duplicateRow(row);
+  });
+
+  addBtn.addEventListener("click", () => {
+    const row = addRow();
+    if (row) {
+      field(row, "item").focus();
+      setStatus("Item " + rowEls().length + " added.");
+    }
+  });
+
+  // Catches textarea drag-resizing, font loading, and anything else that changes height.
+  if (typeof ResizeObserver !== "undefined") new ResizeObserver(resize).observe(document.body);
+
+  /* ---------- Init ---------- */
+
+  function detectRequired(data) {
+    if (data && (data.required === true || isTruthy(data.required))) return true;
+    if (hasApi() && typeof JFCustomWidget.isWidgetRequired === "function") {
+      try { if (JFCustomWidget.isWidgetRequired()) return true; } catch (e) {}
+    }
+    return isTruthy(getSetting("required"));
+  }
+
+  function init(data) {
+    if (state.initialized) return;
+    state.initialized = true;
+    data = data || {};
+
+    state.required = detectRequired(data);
+    state.embedData = !isFalsy(getSetting("embedData"));
+
+    const font = getSetting("fontFamily");
+    if (font) document.documentElement.style.fontFamily = font;
+
+    let saved = null;
+    try { saved = parseValue(data.value); } catch (e) { saved = null; }
+
+    rowsEl.innerHTML = "";
+    if (saved && saved.length) saved.forEach((r) => rowsEl.appendChild(buildRow(r)));
+    else rowsEl.appendChild(buildRow());
+
+    renumber();
+    resize();
+    if (saved && saved.length) pushData();
+  }
+
+  if (hasApi()) {
+    JFCustomWidget.subscribe("ready", init);
+    JFCustomWidget.subscribe("submit", () => {
+      const result = validate();
+      resize();
+      JFCustomWidget.sendSubmit({ valid: result.valid, value: result.value });
+    });
+  }
+
+  // Opened directly in a browser (not inside Jotform): render for previewing.
+  if (!inIframe || !hasApi()) init({});
+
+  // Handy for local testing in the console.
+  window.PrintOrderWidget = { validate, readRows, buildValue, parseValue, init };
+})();
+</script>
+</body>
+</html>
