@@ -147,12 +147,13 @@
   .pmo-status.is-error { color: var(--pmo-error); }
   .pmo-status:empty { display: none; }
 
-  /* Wide screens: fields side by side */
+  /* Wide screens: Item and Quantity side by side, Details full width below */
   @media (min-width: 600px) {
     .pmo-fields {
-      grid-template-columns: minmax(0, 2fr) minmax(0, 1.3fr) minmax(0, 3fr);
+      grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
       align-items: start;
     }
+    .pmo-field-details { grid-column: 1 / -1; }
     .pmo-btn-add { width: auto; }
   }
 
@@ -250,7 +251,7 @@
           '<select id="pmo-qty-' + id + '" data-role="qty" aria-required="true" aria-describedby="pmo-qty-' + id + '-err"></select>' +
           '<p class="pmo-error" id="pmo-qty-' + id + '-err" hidden></p>' +
         '</div>' +
-        '<div class="pmo-field">' +
+        '<div class="pmo-field pmo-field-details">' +
           '<label for="pmo-details-' + id + '">Details</label>' +
           '<textarea id="pmo-details-' + id + '" data-role="details" rows="2" ' +
             'placeholder="Name, email, phone, notes"></textarea>' +
