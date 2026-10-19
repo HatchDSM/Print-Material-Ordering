@@ -201,7 +201,7 @@
     initialized: false,
     required: false,
     embedData: false,
-    format: "table",
+    format: "list",
     lastHeight: 0
   };
   let uid = 0;
@@ -431,47 +431,42 @@
 
   /* ---------- Serialization ---------- */
 
-  // Collapse multi-line details onto one line so each item stays on one line.
+  const NONE = "(none)";
+
+  // Collapse multi-line details onto one line (used by the one-line "text" layout).
   const oneLine = (s) => String(s || "").replace(/\s*[\r\n]+\s*/g, ", ").replace(/\s*\|\s*/g, " / ").trim();
 
-  const escapeHtml = (s) => String(s == null ? "" : s)
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  // Keep the customer's line breaks but drop blank lines, since a blank line separates items.
+  const detailLines = (s) => String(s || "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
 
-  // HTML table for notification emails. Kept on one line with inline styles,
-  // since email clients ignore <style> blocks and Jotform may turn newlines into <br>.
-  function buildTable(rows) {
-    const cell = "padding:6px 10px;border:1px solid #d0d5dd;text-align:left;vertical-align:top;";
-    const head = "background:#f2f4f7;font-weight:600;";
-    const th = (label) => '<th style="' + cell + head + '">' + label + "</th>";
-    const td = (html) => '<td style="' + cell + '">' + html + "</td>";
-    const body = rows.map((r, i) =>
-      "<tr>" +
-        td(String(i + 1)) +
-        td(escapeHtml(r.item) || "&mdash;") +
-        td(r.qty ? fmtQty(r.qty) : "&mdash;") +
-        td(escapeHtml(r.details).replace(/\r?\n/g, "<br>") || "&mdash;") +
-      "</tr>"
-    ).join("");
-    return '<table style="border-collapse:collapse;width:100%;font-size:14px;">' +
-      "<thead><tr>" + th("#") + th("Item") + th("Qty") + th("Details") + "</tr></thead>" +
-      "<tbody>" + body + "</tbody></table>";
+  // Default "list" layout: one block per item, blank line between items.
+  //   Item 1: Envelopes #10 Size
+  //   Quantity: 1,000
+  //   Details: Jane Smith
+  //   jane@example.com
+  function buildList(rows) {
+    return rows.map((r, i) => {
+      const details = detailLines(r.details);
+      return [
+        "Item " + (i + 1) + ": " + (r.item || NONE),
+        "Quantity: " + (r.qty ? fmtQty(r.qty) : NONE),
+        "Details: " + (details.length ? details.join("\n") : NONE)
+      ].join("\n");
+    }).join("\n\n");
+  }
+
+  // Optional "text" layout: one line per item.
+  function buildLines(rows) {
+    return rows.map((r, i) =>
+      "Item " + (i + 1) + ": " + (r.item || NONE) +
+      " | Qty: " + (r.qty ? fmtQty(r.qty) : NONE) +
+      " | Details: " + (oneLine(r.details) || NONE)
+    ).join("\n");
   }
 
   function buildValue(rows) {
     if (!rows.length) return "";
-    if (state.format === "table") {
-      const table = buildTable(rows);
-      if (!state.embedData) return table;
-      return table + DATA_DELIMITER + JSON.stringify({ v: 1, rows: rows });
-    }
-    const text = rows
-      .map((r, i) =>
-        "Item " + (i + 1) + ": " + (r.item || "(none)") +
-        " | Qty: " + (r.qty ? fmtQty(r.qty) : "(none)") +
-        " | Details: " + (oneLine(r.details) || "(none)")
-      )
-      .join("\n");
+    const text = state.format === "text" ? buildLines(rows) : buildList(rows);
     if (!state.embedData) return text;
     const json = JSON.stringify({ v: 1, rows: rows.map((r) => ({ item: r.item, qty: r.qty, details: r.details })) });
     return text + DATA_DELIMITER + json;
@@ -499,7 +494,7 @@
   }
 
   // Restores rows from: (1) the embedded JSON block, (2) raw JSON,
-  // (3) the HTML table, or (4) the plain-text lines.
+  // or (3) the readable text in either layout.
   function parseValue(raw) {
     if (raw == null || raw === "") return null;
     if (typeof raw === "object") return normalizeRows(Array.isArray(raw) ? raw : raw.rows);
@@ -515,28 +510,38 @@
     const direct = parseJsonRows(s.trim());
     if (direct && direct.length) return direct;
 
-    if (/<table[\s>]/i.test(s) && typeof DOMParser !== "undefined") {
-      const doc = new DOMParser().parseFromString(s, "text/html");
-      const rows = Array.prototype.slice.call(doc.querySelectorAll("tbody tr")).map((tr) => {
-        const cells = tr.querySelectorAll("td");
-        if (cells.length < 4) return null;
-        cells[3].querySelectorAll("br").forEach((br) => br.replaceWith("\n"));
-        const val = (c) => { const t = c.textContent.trim(); return t === "\u2014" ? "" : t; };
-        return { item: val(cells[1]), qty: val(cells[2]).replace(/,/g, ""), details: val(cells[3]) };
-      }).filter(Boolean);
-      if (rows.length) return rows.slice(0, MAX_ROWS);
-    }
+    return parseText(s);
+  }
 
-    const re = /^\s*Item\s+\d+:\s*(.*?)\s*\|\s*Qty:\s*([\d,]+|\(none\))\s*\|\s*Details:\s*(.*)$/i;
-    const rows = s.split(/\r?\n/).map((line) => {
-      const m = line.match(re);
-      if (!m) return null;
-      return {
-        item: m[1] === "(none)" ? "" : m[1],
-        qty: m[2] === "(none)" ? "" : m[2].replace(/,/g, ""),
-        details: m[3] === "(none)" ? "" : m[3]
-      };
-    }).filter(Boolean);
+  function parseText(s) {
+    const clean = (v) => { v = String(v || "").trim(); return v === NONE ? "" : v; };
+    const oneLineRe = /^\s*Item\s+\d+:\s*(.*?)\s*\|\s*Qty:\s*(.*?)\s*\|\s*Details:\s*(.*)$/i;
+    const headRe = /^\s*Item\s+\d+:\s*(.*)$/i;
+    const qtyRe = /^\s*Quantity:\s*(.*)$/i;
+    const detRe = /^\s*Details:\s*(.*)$/i;
+
+    const rows = [];
+    let cur = null;
+    let inDetails = false;
+
+    s.split(/\r?\n/).forEach((line) => {
+      let m;
+      if ((m = line.match(oneLineRe))) {
+        rows.push({ item: clean(m[1]), qty: clean(m[2]).replace(/,/g, ""), details: clean(m[3]) });
+        cur = null; inDetails = false;
+      } else if ((m = line.match(headRe))) {
+        cur = { item: clean(m[1]), qty: "", details: "" };
+        rows.push(cur); inDetails = false;
+      } else if (!cur || !line.trim()) {
+        cur = line.trim() ? cur : null; inDetails = false;
+      } else if (!inDetails && (m = line.match(qtyRe))) {
+        cur.qty = clean(m[1]).replace(/,/g, "");
+      } else if (!inDetails && (m = line.match(detRe))) {
+        cur.details = clean(m[1]); inDetails = true;
+      } else if (inDetails) {
+        cur.details += (cur.details ? "\n" : "") + line.trim();
+      }
+    });
     return rows.length ? rows.slice(0, MAX_ROWS) : null;
   }
 
@@ -601,7 +606,7 @@
 
     state.required = detectRequired(data);
     state.embedData = isTruthy(getSetting("embedData"));
-    state.format = /^text$/i.test(getSetting("outputFormat")) ? "text" : "table";
+    state.format = /^text$/i.test(getSetting("outputFormat")) ? "text" : "list";
 
     const font = getSetting("fontFamily");
     if (font) document.documentElement.style.fontFamily = font;
